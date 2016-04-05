@@ -1,0 +1,32 @@
+<component name="libraryTable">
+  <library name="GOPATH &lt;mutservice&gt;">
+    <CLASSES>
+      <root url="file://$PROJECT_DIR$/../github.com" />
+      <root url="file://$PROJECT_DIR$/../app-image-server" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+    <excluded>
+      <root url="file://$PROJECT_DIR$/../github.com/derekparker/delve/dwarf/frame/testdata" />
+      <root url="file://$PROJECT_DIR$/../github.com/buaazp/fasthttprouter/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/cpuid/testdata" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/testdata" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/cpuid/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/gzip/testdata" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/boltdb/bolt/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/valyala/fasthttp/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/zip/testdata" />
+      <root url="file://$PROJECT_DIR$/../github.com/derekparker/delve/_fixtures" />
+      <root url="file://$PROJECT_DIR$/../github.com/nfnt/resize/.git" />
+      <root url="file://$PROJECT_DIR$/../app-image-server/.idea" />
+      <root url="file://$PROJECT_DIR$/../github.com/mailru/easyjson/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/nu7hatch/gouuid/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/derekparker/delve/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/flate/testdata" />
+      <root url="file://$PROJECT_DIR$" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/crc32/.git" />
+      <root url="file://$PROJECT_DIR$/../github.com/klauspost/compress/snappy/testdata" />
+    </excluded>
+  </library>
+</component>
