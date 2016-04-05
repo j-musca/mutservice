@@ -1,0 +1,48 @@
+#%RAML 1.0
+title: mut-service
+version: v1
+baseUri: http://api.mut-service.com
+types:
+  User:
+    type: object
+    properties:
+      uuid: string
+      email: string
+  Feedback:
+    type: object
+    properties:
+      key: string
+      mood:
+        type: number
+        minimum: 0
+        maximum: 4
+        displayName: Mood
+        description: Defines the mood of a user in a range from 0 (unhappy) to 4 (happy).
+/users:
+  get:
+    responses:
+      200:
+        body:
+          application/json:
+            example: |
+              {
+                "users" : [
+                  {
+                    "uuid": "123-456-789",
+                    "email": "mail0@test.com"
+                  },
+                  {
+                    "uuid": "123-456-710",
+                    "email": "mail1@test.com"
+                  }
+                ]
+              }
+  put:
+    body:
+      application/json:
+        type: string
+    responses:
+      201:
+        body:
+          application/json:
+            type: User
