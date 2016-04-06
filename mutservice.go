@@ -1,20 +1,19 @@
 package main
 
-
 import (
+	"encoding/json"
+	"fmt"
+	"github.com/boltdb/bolt"
+	"github.com/buaazp/fasthttprouter"
+	"github.com/nu7hatch/gouuid"
+	"github.com/valyala/fasthttp"
 	"log"
 	"os"
-	"github.com/valyala/fasthttp"
-	"github.com/buaazp/fasthttprouter"
-	"github.com/boltdb/bolt"
 	"time"
-	"fmt"
-	"encoding/json"
-	"github.com/nu7hatch/gouuid"
 )
 
 func main() {
-	db, boltErr := bolt.Open(os.Getenv("HOME") + "/app-mut.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+	db, boltErr := bolt.Open(os.Getenv("HOME")+"/app-mut.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
 
 	if boltErr != nil {
 		log.Fatal(boltErr)
@@ -24,7 +23,7 @@ func main() {
 
 	db.Update(createBuckets)
 
-	serverError := fasthttp.ListenAndServe(":8080", createRouter(db).Handler)
+	serverError := fasthttp.ListenAndServe(":8081", createRouter(db).Handler)
 
 	if serverError != nil {
 		log.Fatalf("Error in ListenAndServe: %s", serverError)
@@ -38,7 +37,7 @@ func createBuckets(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(element))
 
 		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
+			return fmt.Errorf("Could not create bucket: %s", err)
 		}
 	}
 
@@ -48,16 +47,16 @@ func createBuckets(tx *bolt.Tx) error {
 func createRouter(db *bolt.DB) (router *fasthttprouter.Router) {
 	router = fasthttprouter.New()
 
-	router.GET("/users", getUsers(db))
-	//router.GET("/users/:uuid", getUserById(db))
-	router.POST("/users", saveUser(db))
+	router.GET("/users", getUsersRequest(db))
+	router.GET("/users/:uuid", getUserByUuidRequest(db))
+	router.POST("/users", putUserRequest(db))
 
 	return router
 }
 
-func getUsers(db *bolt.DB) fasthttprouter.Handle {
+func getUsersRequest(db *bolt.DB) fasthttprouter.Handle {
 	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		users, dbError := getUsersFromDB(db)
+		users, dbError := getUsers(db)
 
 		if dbError != nil {
 			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
@@ -79,8 +78,7 @@ func getUsers(db *bolt.DB) fasthttprouter.Handle {
 	})
 }
 
-func getUsersFromDB(db *bolt.DB) (users []User, dbError error) {
-	fmt.Println("Load Users!")
+func getUsers(db *bolt.DB) (users []User, dbError error) {
 	dbError = db.View(func(tx *bolt.Tx) error {
 		usersBucket := tx.Bucket([]byte("users"))
 		usersBucket.ForEach(func(uuid []byte, email []byte) error {
@@ -93,21 +91,62 @@ func getUsersFromDB(db *bolt.DB) (users []User, dbError error) {
 	return users, dbError
 }
 
-func saveUser(db *bolt.DB) fasthttprouter.Handle {
+func getUserByUuidRequest(db *bolt.DB) fasthttprouter.Handle {
 	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		var userCreation UserCreation
+		uuid := params.ByName("uuid")
+		user, dbError := getUserByUuid(db, uuid)
 
-		fmt.Println(string(ctx.PostBody()))
+		if dbError != nil {
+			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+			ctx.SetBody([]byte(dbError.Error()))
+		} else {
+			if user != nil {
+				json, jsonError := json.Marshal(user)
 
+				if jsonError != nil {
+					ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+					ctx.SetBody([]byte(jsonError.Error()))
+				} else {
+					ctx.SetStatusCode(fasthttp.StatusOK)
+					ctx.SetContentType("application/json")
+					ctx.SetBody(json)
+				}
+			} else {
+				ctx.SetStatusCode(fasthttp.StatusNotFound)
+				ctx.SetBody([]byte("{\"message\":\"User with uuid '" + uuid + "' not found!\"}"))
+			}
+		}
+	})
+}
+
+func getUserByUuid(db *bolt.DB, uuid string) (user *User, dbError error) {
+	dbError = db.View(func(tx *bolt.Tx) error {
+		usersBucket := tx.Bucket([]byte("users"))
+
+		email := usersBucket.Get([]byte(uuid))
+
+		if email != nil {
+			user = &User{uuid, string(email)}
+		}
+
+		return nil
+	})
+
+	return user, dbError
+}
+
+func putUserRequest(db *bolt.DB) fasthttprouter.Handle {
+	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
+		userCreation := UserCreation{}
 		jsonError := json.Unmarshal(ctx.PostBody(), &userCreation)
-		fmt.Println(userCreation.email)
+
 		if jsonError != nil {
 			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
 			ctx.SetBody([]byte(jsonError.Error()))
 		} else {
-			user, dbError := insertUserToDB(db, userCreation)
+			user, dbError := saveUser(db, userCreation)
 
-			fmt.Println(user)
+			fmt.Printf("Saved user: %s\n", user)
 
 			if dbError != nil {
 				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
@@ -124,27 +163,26 @@ func saveUser(db *bolt.DB) fasthttprouter.Handle {
 	})
 }
 
-func insertUserToDB(db *bolt.DB, userCreation UserCreation) (user User, err error) {
+func saveUser(db *bolt.DB, userCreation UserCreation) (user User, err error) {
 	uuid, _ := uuid.NewV4()
 
-	fmt.Println("Saved User!")
 	dbError := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("users"))
-		return bucket.Put([]byte(uuid.String()), []byte(userCreation.email))
+		return bucket.Put([]byte(uuid.String()), []byte(userCreation.Email))
 	})
 
-	return User{uuid.String(), userCreation.email}, dbError
+	return User{uuid.String(), userCreation.Email}, dbError
 }
 
 type User struct {
-	uuid string
-	email string
+	Uuid  string `json:"uuid"`
+	Email string `json:"email"`
 }
 
 type UsersResponse struct {
-	users []User
+	Users []User `json:"users"`
 }
 
 type UserCreation struct {
-	email string
+	Email string `json:"email"`
 }
