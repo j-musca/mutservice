@@ -39,6 +39,8 @@ func main() {
 	if serverError != nil {
 		log.Fatalf("Error in ListenAndServe: %s", serverError)
 	}
+
+	log.Println("Started server on port 8081.")
 }
 
 func createDatabase() (db *bolt.DB, dbError error) {
@@ -82,7 +84,7 @@ func sendMail(email string, text string) {
 
 func triggerMail(db *bolt.DB) func() {
 	return func() {
-		log.Println("Triggered Mail")
+		log.Println("Triggered mail sending!")
 		users, triggerError := getUsers(db)
 
 		if triggerError != nil {
@@ -156,9 +158,34 @@ func createRouter(db *bolt.DB) (router *fasthttprouter.Router) {
 
 	router.GET("/users", getUsersRequest(db))
 	router.GET("/users/:uuid", getUserByUuidRequest(db))
-	router.POST("/users", putUserRequest(db))
+	router.POST("/users", postUserRequest(db))
+	router.POST("/moods/:key", postMoodRequest(db))
 
 	return router
+}
+
+func postMoodRequest(db *bolt.DB) fasthttprouter.Handle {
+	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
+		key := params.ByName("key")
+		dateString := getDateString(db, key)
+		if dateString != nil {
+			mood := Mood{}
+			jsonError := json.Unmarshal(ctx.PostBody(), &mood)
+
+			if jsonError != nil {
+				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+				ctx.SetBody([]byte(jsonError.Error()))
+			} else {
+				saveMood(db, dateString, mood)
+
+				ctx.SetStatusCode(fasthttp.StatusCreated)
+				ctx.SetContentType("application/json")
+			}
+		} else {
+			ctx.SetStatusCode(fasthttp.StatusNotFound)
+			ctx.SetBody([]byte("{\"message\":\"Mood with key '" + key + "' not found!\"}"))
+		}
+	})
 }
 
 func getUsersRequest(db *bolt.DB) fasthttprouter.Handle {
@@ -241,7 +268,21 @@ func getUserByUuid(db *bolt.DB, uuid string) (user *User, dbError error) {
 	return user, dbError
 }
 
-func putUserRequest(db *bolt.DB) fasthttprouter.Handle {
+func getDateString(db *bolt.DB, key string) (dateString string) {
+	dbError := db.View(func(tx *bolt.Tx) error {
+		keysBucket := tx.Bucket(KEYS_BUCKET)
+		dateString = string(keysBucket.Get([]byte(key)))
+		return keysBucket.Delete([]byte(key))
+	})
+
+	if dbError != nil {
+		log.Println("Could not delete key: " + key)
+	}
+
+	return dateString
+}
+
+func postUserRequest(db *bolt.DB) fasthttprouter.Handle {
 	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
 		userCreation := UserCreation{}
 		jsonError := json.Unmarshal(ctx.PostBody(), &userCreation)
@@ -280,9 +321,53 @@ func saveUser(db *bolt.DB, userCreation UserCreation) (user User, err error) {
 	return User{uuid.String(), userCreation.Email}, dbError
 }
 
+func saveMood(db *bolt.DB, dateString string, mood Mood) (err error) {
+	dbError := db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(MOODS_BUCKET)
+
+		moodsOfDay := bucket.Get(dateString)
+		dailyMoods := DailyMoods{}
+		_ = json.Unmarshal(moodsOfDay, &dailyMoods)
+
+		if (mood.Value == 0) {
+			dailyMoods.VeryUnhappy++
+		}
+		if (mood.Value == 1) {
+			dailyMoods.Unhappy++
+		}
+		if (mood.Value == 2) {
+			dailyMoods.Neutral++
+		}
+		if (mood.Value == 3) {
+			dailyMoods.Happy++
+		}
+		if (mood.Value == 4) {
+			dailyMoods.VeryHappy++
+		}
+
+		json, _ := json.Marshal(dailyMoods)
+
+		return bucket.Put([]byte(dateString), []byte(json))
+	})
+
+	return dbError
+}
+
 type FeedbackKey struct {
 	Key        string
 	DateString string
+}
+
+type DailyMoods struct {
+	VeryUnhappy int
+	Unhappy int
+	Neutral int
+	Happy 	int
+	VeryHappy int
+}
+
+type Mood struct {
+	Value int `json:"mood"`
 }
 
 type User struct {
