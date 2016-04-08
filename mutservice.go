@@ -1,21 +1,19 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/buaazp/fasthttprouter"
+	"github.com/ddliu/go-httpclient"
 	"github.com/nu7hatch/gouuid"
+	"github.com/robfig/cron"
 	"github.com/valyala/fasthttp"
 	"log"
 	"os"
-	"time"
-	"crypto/sha1"
-	"encoding/hex"
 	"strings"
-	"io/ioutil"
-	"github.com/ddliu/go-httpclient"
-	"github.com/robfig/cron"
+	"time"
 )
 
 var USERS_BUCKET []byte = []byte("users")
@@ -24,19 +22,17 @@ var MOODS_BUCKET []byte = []byte("moods")
 var BUCKET_NAMES [][]byte = [][]byte{USERS_BUCKET, KEYS_BUCKET, MOODS_BUCKET}
 
 func main() {
-	dataBase, dataBaseError := bolt.Open(os.Getenv("HOME")+"/app-mut.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+	dataBase, dataBaseError := createDatabase()
+
+	if dataBase != nil {
+		defer dataBase.Close()
+	}
 
 	if dataBaseError != nil {
 		log.Fatal(dataBaseError)
 	}
 
-	defer dataBase.Close()
-
-	scheduler := cron.New()
-
-	scheduler.AddFunc("14 30 * * * *", triggerMail(dataBase))
-
-	dataBase.Update(createBuckets)
+	createCronJob(dataBase)
 
 	serverError := fasthttp.ListenAndServe(":8081", createRouter(dataBase).Handler)
 
@@ -45,40 +41,58 @@ func main() {
 	}
 }
 
+func createDatabase() (db *bolt.DB, dbError error) {
+	dataBase, dbError := bolt.Open(os.Getenv("HOME")+"/app-mut.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+
+	if dbError != nil {
+		return nil, dbError
+	}
+
+	dbError = dataBase.Update(createBuckets)
+
+	if dbError != nil {
+		return nil, dbError
+	}
+
+	return dataBase, nil
+}
+
+func createCronJob(dataBase *bolt.DB) {
+	scheduler := cron.New()
+	scheduler.AddFunc("0 30 14 * * *", triggerMail(dataBase))
+	scheduler.Start()
+}
+
 func sendMail(email string, text string) {
 	response, responseError := httpclient.
-	WithHeader("Authorization", "Basic YXBpOmtleS00NWY0ODYxNTVkZmUzZjUxY2ExOTg4MjEwNGIzYmViMg==").
-	Post("https://api.mailgun.net/v3/sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org/messages", map[string]string {
-		"from": "Mailgun Sandbox <postmaster@sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org>",
-		"to": email,
-		"subject": "How is your mood today?",
-		"text": text,
-	})
+		WithHeader("Authorization", "Basic YXBpOmtleS00NWY0ODYxNTVkZmUzZjUxY2ExOTg4MjEwNGIzYmViMg==").
+		Post("https://api.mailgun.net/v3/sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org/messages", map[string]string{
+			"from":    "Mailgun Sandbox <postmaster@sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org>",
+			"to":      email,
+			"subject": "How is your mood today?",
+			"text":    text,
+		})
 
 	if responseError != nil {
-		fmt.Printf("%s", responseError)
+		log.Printf("%s", responseError)
 	}
 
 	defer response.Body.Close()
-
-	_, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		fmt.Printf("%s", err)
-	}
 }
 
-func triggerMail(db *bolt.DB) {
+func triggerMail(db *bolt.DB) func() {
 	return func() {
+		log.Println("Triggered Mail")
 		users, triggerError := getUsers(db)
 
 		if triggerError != nil {
-			fmt.Printf("%s", triggerError)
+			log.Printf("%s", triggerError)
 		}
 
 		mailTasks, triggerError := createMailTasks(users, db)
 
 		if triggerError != nil {
-			fmt.Printf("%s", triggerError)
+			log.Printf("%s", triggerError)
 		}
 
 		sendMails(mailTasks)
@@ -87,7 +101,7 @@ func triggerMail(db *bolt.DB) {
 
 func sendMails(tasks []MailTask) {
 	for _, task := range tasks {
-		sendMail(task.Email, "" + task.Key)
+		sendMail(task.Email, ""+task.Key)
 	}
 }
 
@@ -130,7 +144,7 @@ func createBuckets(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(element)
 
 		if err != nil {
-			return fmt.Errorf("Could not create bucket: %s", err)
+			return err
 		}
 	}
 
@@ -238,7 +252,7 @@ func putUserRequest(db *bolt.DB) fasthttprouter.Handle {
 		} else {
 			user, dbError := saveUser(db, userCreation)
 
-			fmt.Printf("Saved user: %s\n", user)
+			log.Printf("Saved user: %s\n", user)
 
 			if dbError != nil {
 				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
@@ -267,7 +281,7 @@ func saveUser(db *bolt.DB, userCreation UserCreation) (user User, err error) {
 }
 
 type FeedbackKey struct {
-	Key string
+	Key        string
 	DateString string
 }
 
@@ -286,5 +300,5 @@ type UserCreation struct {
 
 type MailTask struct {
 	Email string
-	Key string
+	Key   string
 }
