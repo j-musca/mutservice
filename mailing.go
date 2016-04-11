@@ -4,6 +4,7 @@ import (
 	"github.com/asdine/storm"
 	"github.com/ddliu/go-httpclient"
 	"log"
+	"os"
 )
 
 type (
@@ -13,10 +14,12 @@ type (
 	}
 )
 
+const BasicAuthHeader string = "Basic " + os.Getenv("MUT_BASIC_AUTH")
+const MailGunUrl string = os.Getenv("MUT_MAILGUN_URL")
+
 func sendMail(email string, text string) {
-	response, responseError := httpclient.
-		WithHeader("Authorization", "Basic YXBpOmtleS00NWY0ODYxNTVkZmUzZjUxY2ExOTg4MjEwNGIzYmViMg==").
-		Post("https://api.mailgun.net/v3/sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org/messages", map[string]string{
+	response, responseError := httpclient.WithHeader("Authorization", BasicAuthHeader).Post(MailGunUrl,
+		map[string]string{
 			"from":    "Mailgun Sandbox <postmaster@sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org>",
 			"to":      email,
 			"subject": "How is your mood today?",
