@@ -5,8 +5,8 @@ import (
 	"github.com/robfig/cron"
 )
 
-func createCronJob(dataBase *storm.DB, cmd func()) {
+func createCronJob(database *storm.DB, command func()) {
 	scheduler := cron.New()
-	scheduler.AddFunc("0 28 13 * * *", cmd)
+	scheduler.AddFunc("0 28 13 * * *", command)
 	scheduler.Start()
 }

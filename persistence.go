@@ -64,14 +64,6 @@ func createDatabase() (database *storm.DB) {
 	return database
 }
 
-func saveSubscription(database *storm.DB, subscription *Subscription) (subscriber Subscriber, databaseError error) {
-	uuid, _ := uuid.NewV4()
-	subscriber = Subscriber{uuid.String(), subscription.Email}
-	databaseError = database.Save(&subscriber)
-
-	return subscriber, databaseError
-}
-
 func saveDailyMoods(database *storm.DB, dateString string) (databaseError error) {
 	dailyMoods := new(DailyMoods)
 	dailyMoods.DateString = dateString
@@ -91,10 +83,23 @@ func updateDailyMoods(database *storm.DB, dateString string, mood string) (datab
 	return database.Save(dailyMoods)
 }
 
-func getSubscriptionByUuid(database *storm.DB, uuid string) (subscriber *Subscriber, databaseError error) {
+func saveSubscriber(database *storm.DB, subscription *Subscription) (subscriber Subscriber, databaseError error) {
+	uuid, _ := uuid.NewV4()
+	subscriber = Subscriber{uuid.String(), subscription.Email}
+	databaseError = database.Save(&subscriber)
+
+	return subscriber, databaseError
+}
+
+func getSubscriberByUuid(database *storm.DB, uuid string) (subscriber *Subscriber, databaseError error) {
 	subscriber = new(Subscriber)
 	databaseError = database.One("Uuid", uuid, subscriber)
 	return subscriber, databaseError
+}
+
+func getAllSubscribers(database *storm.DB) (subscribers []Subscriber, databaseError error) {
+	databaseError = database.All(&subscribers)
+	return subscribers, databaseError
 }
 
 func getFeedbackIdentifier(database *storm.DB, key string) (feedbackIdentifier *FeedbackIdentifier) {
@@ -108,11 +113,6 @@ func getFeedbackIdentifier(database *storm.DB, key string) (feedbackIdentifier *
 	database.Remove(feedbackIdentifier)
 
 	return feedbackIdentifier
-}
-
-func getSubscriptions(database *storm.DB) (subscribers []Subscriber, databaseError error) {
-	databaseError = database.All(&subscribers)
-	return subscribers, databaseError
 }
 
 func saveFeedbackIdentifierAndCreateMailTasks(subscribers []Subscriber, database *storm.DB) (tasks []MailTask, databaseError error) {

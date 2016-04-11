@@ -14,8 +14,8 @@ type (
 	}
 )
 
-const BasicAuthHeader string = "Basic " + os.Getenv("MUT_BASIC_AUTH")
-const MailGunUrl string = os.Getenv("MUT_MAILGUN_URL")
+var BasicAuthHeader string = "Basic " + os.Getenv("MUT_BASIC_AUTH")
+var MailGunUrl string = os.Getenv("MUT_MAILGUN_URL")
 
 func sendMail(email string, text string) {
 	response, responseError := httpclient.WithHeader("Authorization", BasicAuthHeader).Post(MailGunUrl,
@@ -35,7 +35,7 @@ func sendMail(email string, text string) {
 func triggerMail(database *storm.DB) func() {
 	return func() {
 		log.Println("Triggered mail sending!")
-		subscriptions, triggerError := getSubscriptions(database)
+		subscriptions, triggerError := getAllSubscribers(database)
 
 		if triggerError != nil {
 			log.Printf("%s", triggerError)

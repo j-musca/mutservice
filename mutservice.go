@@ -107,12 +107,12 @@ func postDailyMoods(database *storm.DB) echo.HandlerFunc {
 
 func getSubscribers(database *storm.DB) echo.HandlerFunc {
 	return (func(context echo.Context) error {
-		subscriptions, databaseError := getSubscriptions(database)
+		subscribers, databaseError := getAllSubscribers(database)
 
 		if databaseError != nil {
 			return databaseError
 		} else {
-			return context.JSON(http.StatusOK, subscriptions)
+			return context.JSON(http.StatusOK, subscribers)
 		}
 
 		return nil
@@ -122,7 +122,7 @@ func getSubscribers(database *storm.DB) echo.HandlerFunc {
 func getSubscribersByUuid(database *storm.DB) echo.HandlerFunc {
 	return (func(context echo.Context) error {
 		uuid := context.Param("uuid")
-		subscriber, databaseError := getSubscriptionByUuid(database, uuid)
+		subscriber, databaseError := getSubscriberByUuid(database, uuid)
 
 		if databaseError != nil {
 			return databaseError
@@ -141,15 +141,14 @@ func getSubscribersByUuid(database *storm.DB) echo.HandlerFunc {
 func postSubscriber(db *storm.DB) echo.HandlerFunc {
 	return (func(context echo.Context) error {
 		subscription := new(Subscription)
+
 		if jsonError := context.Bind(subscription); jsonError != nil {
 			return jsonError
 		} else {
-			subscriber, databaseError := saveSubscription(db, subscription)
-
-			log.Printf("Saved user: %s\n", subscriber)
+			subscriber, databaseError := saveSubscriber(db, subscription)
 
 			if databaseError != nil {
-				return databaseError.Error()
+				return databaseError
 			} else {
 				return context.JSON(http.StatusCreated, subscriber)
 			}
