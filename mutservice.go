@@ -1,389 +1,160 @@
 package main
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
-	"encoding/json"
-	"github.com/boltdb/bolt"
-	"github.com/buaazp/fasthttprouter"
-	"github.com/ddliu/go-httpclient"
-	"github.com/nu7hatch/gouuid"
-	"github.com/robfig/cron"
-	"github.com/valyala/fasthttp"
+	"github.com/asdine/storm"
+	"github.com/labstack/echo"
+	"github.com/labstack/echo/engine/fasthttp"
+	"github.com/labstack/echo/middleware"
 	"log"
-	"os"
-	"strings"
-	"time"
+	"net/http"
 )
 
-var USERS_BUCKET []byte = []byte("users")
-var KEYS_BUCKET []byte = []byte("keys")
-var MOODS_BUCKET []byte = []byte("moods")
-var BUCKET_NAMES [][]byte = [][]byte{USERS_BUCKET, KEYS_BUCKET, MOODS_BUCKET}
+type (
+	Mood struct {
+		Value int `json:"mood"`
+	}
+
+	Subscribers struct {
+		Users []Subscriber `json:"users"`
+	}
+
+	Subscription struct {
+		Email string `json:"email"`
+	}
+)
 
 func main() {
-	dataBase, dataBaseError := createDatabase()
+	database := createDatabase()
+	defer database.Close()
 
-	if dataBase != nil {
-		defer dataBase.Close()
-	}
+	createCronJob(database, triggerMail(database))
 
-	if dataBaseError != nil {
-		log.Fatal(dataBaseError)
-	}
-
-	createCronJob(dataBase)
-
-	serverError := fasthttp.ListenAndServe(":8081", createRouter(dataBase).Handler)
-
-	if serverError != nil {
-		log.Fatalf("Error in ListenAndServe: %s", serverError)
-	}
+	server := initServer(database)
+	server.Run(fasthttp.New(":8081"))
 
 	log.Println("Started server on port 8081.")
 }
 
-func createDatabase() (db *bolt.DB, dbError error) {
-	dataBase, dbError := bolt.Open(os.Getenv("HOME")+"/app-mut.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+func initServer(database *storm.DB) (server *echo.Echo) {
+	server = echo.New()
 
-	if dbError != nil {
-		return nil, dbError
-	}
+	server.Use(middleware.Logger())
+	server.Get("/subscribers", getSubscribers(database))
+	server.Get("/subscribers/:uuid", getSubscribersByUuid(database))
+	server.Post("/subscribers", postSubscriber(database))
+	server.Get("/moods/:key", getDailyMoods())
+	server.Post("/moods/:key", postDailyMoods(database))
 
-	dbError = dataBase.Update(createBuckets)
-
-	if dbError != nil {
-		return nil, dbError
-	}
-
-	return dataBase, nil
+	return server
 }
 
-func createCronJob(dataBase *bolt.DB) {
-	scheduler := cron.New()
-	scheduler.AddFunc("0 30 14 * * *", triggerMail(dataBase))
-	scheduler.Start()
+func getDailyMoods() echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		key := context.Param("key")
+
+		htmlContent := `<html>
+	<body>
+	<h1>Select your mood</h1>
+	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<input type="hidden" name="mood" value="0">
+	<input type="submit" value="Very unhappy">
+	</form>
+	<br/>
+	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<input type="hidden" name="mood" value="1">
+	<input type="submit" value="Unhappy">
+	</form>
+	<br/>
+	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<input type="hidden" name="mood" value="2">
+	<input type="submit" value="Neutral">
+	</form>
+	<br/>
+	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<input type="hidden" name="mood" value="3">
+	<input type="submit" value="Happy">
+	</form>
+	<br/>
+	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<input type="hidden" name="mood" value="4">
+	<input type="submit" value="Very happy">
+	</form>
+	</body>
+	</html>`
+		return context.HTML(http.StatusOK, htmlContent)
+
+	})
 }
 
-func sendMail(email string, text string) {
-	response, responseError := httpclient.
-		WithHeader("Authorization", "Basic YXBpOmtleS00NWY0ODYxNTVkZmUzZjUxY2ExOTg4MjEwNGIzYmViMg==").
-		Post("https://api.mailgun.net/v3/sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org/messages", map[string]string{
-			"from":    "Mailgun Sandbox <postmaster@sandbox4ebeef9e81ca4130885ef51fa4b9729f.mailgun.org>",
-			"to":      email,
-			"subject": "How is your mood today?",
-			"text":    text,
-		})
+func postDailyMoods(database *storm.DB) echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		key := context.Param("key")
+		mood := context.FormValue("mood")
 
-	if responseError != nil {
-		log.Printf("%s", responseError)
-	}
-
-	defer response.Body.Close()
-}
-
-func triggerMail(db *bolt.DB) func() {
-	return func() {
-		log.Println("Triggered mail sending!")
-		users, triggerError := getUsers(db)
-
-		if triggerError != nil {
-			log.Printf("%s", triggerError)
-		}
-
-		mailTasks, triggerError := createMailTasks(users, db)
-
-		if triggerError != nil {
-			log.Printf("%s", triggerError)
-		}
-
-		sendMails(mailTasks)
-	}
-}
-
-func sendMails(tasks []MailTask) {
-	for _, task := range tasks {
-		sendMail(task.Email, ""+task.Key)
-	}
-}
-
-func createMailTasks(users []User, db *bolt.DB) (tasks []MailTask, dbError error) {
-	today := time.Now().Format("02-01-2006")
-
-	dbError = db.Update(func(tx *bolt.Tx) error {
-		tx.DeleteBucket(KEYS_BUCKET)
-		bucket, _ := tx.CreateBucket(KEYS_BUCKET)
-
-		for _, user := range users {
-			key := createKey(user.Uuid, today)
-
-			bucketError := bucket.Put([]byte(key), []byte(today))
-
-			if bucketError != nil {
-				return bucketError
+		if feedbackIdentifier := getFeedbackIdentifier(database, key); feedbackIdentifier != nil {
+			if databaseError := updateDailyMoods(database, feedbackIdentifier.DateString, mood); databaseError != nil {
+				return context.String(http.StatusInternalServerError, databaseError.Error())
+			} else {
+				return context.String(http.StatusCreated, "Thank you!")
 			}
-
-			tasks = append(tasks, MailTask{user.Email, key})
+		} else {
+			return context.String(http.StatusNotFound, "Mood with key '"+key+"' not found!")
 		}
 
 		return nil
 	})
-
-	return tasks, dbError
 }
 
-func createKey(uuid string, dateString string) (key string) {
-	source := strings.Join([]string{uuid, dateString}, "-")
-	hashCreator := sha1.New()
-	hashCreator.Write([]byte(source))
-	key = hex.EncodeToString(hashCreator.Sum(nil))
+func getSubscribers(database *storm.DB) echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		subscriptions, databaseError := getSubscriptions(database)
 
-	return key
-}
-
-func createBuckets(tx *bolt.Tx) error {
-	for _, element := range BUCKET_NAMES {
-		_, err := tx.CreateBucketIfNotExists(element)
-
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func createRouter(db *bolt.DB) (router *fasthttprouter.Router) {
-	router = fasthttprouter.New()
-
-	router.GET("/users", getUsersRequest(db))
-	router.GET("/users/:uuid", getUserByUuidRequest(db))
-	router.POST("/users", postUserRequest(db))
-	router.POST("/moods/:key", postMoodRequest(db))
-
-	return router
-}
-
-func postMoodRequest(db *bolt.DB) fasthttprouter.Handle {
-	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		key := params.ByName("key")
-		dateString := getDateString(db, key)
-		if dateString != nil {
-			mood := Mood{}
-			jsonError := json.Unmarshal(ctx.PostBody(), &mood)
-
-			if jsonError != nil {
-				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-				ctx.SetBody([]byte(jsonError.Error()))
-			} else {
-				saveMood(db, dateString, mood)
-
-				ctx.SetStatusCode(fasthttp.StatusCreated)
-				ctx.SetContentType("application/json")
-			}
+		if databaseError != nil {
+			return context.String(http.StatusInternalServerError, databaseError.Error())
 		} else {
-			ctx.SetStatusCode(fasthttp.StatusNotFound)
-			ctx.SetBody([]byte("{\"message\":\"Mood with key '" + key + "' not found!\"}"))
-		}
-	})
-}
-
-func getUsersRequest(db *bolt.DB) fasthttprouter.Handle {
-	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		users, dbError := getUsers(db)
-
-		if dbError != nil {
-			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-			ctx.SetBody([]byte(dbError.Error()))
-		} else {
-			usersResponse := UsersResponse{users}
-			json, jsonError := json.Marshal(usersResponse)
-
-			if jsonError != nil {
-				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-				ctx.SetBody([]byte(jsonError.Error()))
-			} else {
-				ctx.SetStatusCode(fasthttp.StatusOK)
-				ctx.SetContentType("application/json")
-				ctx.SetBody(json)
-			}
-
-		}
-	})
-}
-
-func getUsers(db *bolt.DB) (users []User, dbError error) {
-	dbError = db.View(func(tx *bolt.Tx) error {
-		usersBucket := tx.Bucket(USERS_BUCKET)
-		usersBucket.ForEach(func(uuid []byte, email []byte) error {
-			users = append(users, User{string(uuid), string(email)})
-			return nil
-		})
-		return nil
-	})
-
-	return users, dbError
-}
-
-func getUserByUuidRequest(db *bolt.DB) fasthttprouter.Handle {
-	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		uuid := params.ByName("uuid")
-		user, dbError := getUserByUuid(db, uuid)
-
-		if dbError != nil {
-			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-			ctx.SetBody([]byte(dbError.Error()))
-		} else {
-			if user != nil {
-				json, jsonError := json.Marshal(user)
-
-				if jsonError != nil {
-					ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-					ctx.SetBody([]byte(jsonError.Error()))
-				} else {
-					ctx.SetStatusCode(fasthttp.StatusOK)
-					ctx.SetContentType("application/json")
-					ctx.SetBody(json)
-				}
-			} else {
-				ctx.SetStatusCode(fasthttp.StatusNotFound)
-				ctx.SetBody([]byte("{\"message\":\"User with uuid '" + uuid + "' not found!\"}"))
-			}
-		}
-	})
-}
-
-func getUserByUuid(db *bolt.DB, uuid string) (user *User, dbError error) {
-	dbError = db.View(func(tx *bolt.Tx) error {
-		usersBucket := tx.Bucket(USERS_BUCKET)
-		email := usersBucket.Get([]byte(uuid))
-
-		if email != nil {
-			user = &User{uuid, string(email)}
+			return context.JSON(http.StatusOK, subscriptions)
 		}
 
 		return nil
 	})
-
-	return user, dbError
 }
 
-func getDateString(db *bolt.DB, key string) (dateString string) {
-	dbError := db.View(func(tx *bolt.Tx) error {
-		keysBucket := tx.Bucket(KEYS_BUCKET)
-		dateString = string(keysBucket.Get([]byte(key)))
-		return keysBucket.Delete([]byte(key))
-	})
+func getSubscribersByUuid(database *storm.DB) echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		uuid := context.Param("uuid")
+		subscriber, databaseError := getSubscriptionByUuid(database, uuid)
 
-	if dbError != nil {
-		log.Println("Could not delete key: " + key)
-	}
-
-	return dateString
-}
-
-func postUserRequest(db *bolt.DB) fasthttprouter.Handle {
-	return (func(ctx *fasthttp.RequestCtx, params fasthttprouter.Params) {
-		userCreation := UserCreation{}
-		jsonError := json.Unmarshal(ctx.PostBody(), &userCreation)
-
-		if jsonError != nil {
-			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-			ctx.SetBody([]byte(jsonError.Error()))
+		if databaseError != nil {
+			return context.String(http.StatusInternalServerError, databaseError.Error())
 		} else {
-			user, dbError := saveUser(db, userCreation)
+			if subscriber != nil {
+				return context.JSON(http.StatusOK, subscriber)
+			} else {
+				return context.String(http.StatusNotFound, "User with uuid '"+uuid+"' not found!")
+			}
+		}
 
-			log.Printf("Saved user: %s\n", user)
+		return nil
+	})
+}
+
+func postSubscriber(db *storm.DB) echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		subscription := new(Subscription)
+		if jsonError := context.Bind(subscription); jsonError != nil {
+			return context.String(http.StatusInternalServerError, jsonError.Error())
+		} else {
+			subscriber, dbError := saveSubscription(db, subscription)
+
+			log.Printf("Saved user: %s\n", subscriber)
 
 			if dbError != nil {
-				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-				ctx.SetBody([]byte(dbError.Error()))
+				return context.String(http.StatusInternalServerError, dbError.Error())
 			} else {
-				json, _ := json.Marshal(user)
-				ctx.SetStatusCode(fasthttp.StatusCreated)
-				ctx.SetContentType("application/json")
-				ctx.SetBody(json)
+				return context.JSON(http.StatusCreated, subscriber)
 			}
-
 		}
 
+		return nil
 	})
-}
-
-func saveUser(db *bolt.DB, userCreation UserCreation) (user User, err error) {
-	uuid, _ := uuid.NewV4()
-
-	dbError := db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(USERS_BUCKET)
-		return bucket.Put([]byte(uuid.String()), []byte(userCreation.Email))
-	})
-
-	return User{uuid.String(), userCreation.Email}, dbError
-}
-
-func saveMood(db *bolt.DB, dateString string, mood Mood) (err error) {
-	dbError := db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(MOODS_BUCKET)
-
-		moodsOfDay := bucket.Get(dateString)
-		dailyMoods := DailyMoods{}
-		_ = json.Unmarshal(moodsOfDay, &dailyMoods)
-
-		if (mood.Value == 0) {
-			dailyMoods.VeryUnhappy++
-		}
-		if (mood.Value == 1) {
-			dailyMoods.Unhappy++
-		}
-		if (mood.Value == 2) {
-			dailyMoods.Neutral++
-		}
-		if (mood.Value == 3) {
-			dailyMoods.Happy++
-		}
-		if (mood.Value == 4) {
-			dailyMoods.VeryHappy++
-		}
-
-		json, _ := json.Marshal(dailyMoods)
-
-		return bucket.Put([]byte(dateString), []byte(json))
-	})
-
-	return dbError
-}
-
-type FeedbackKey struct {
-	Key        string
-	DateString string
-}
-
-type DailyMoods struct {
-	VeryUnhappy int
-	Unhappy int
-	Neutral int
-	Happy 	int
-	VeryHappy int
-}
-
-type Mood struct {
-	Value int `json:"mood"`
-}
-
-type User struct {
-	Uuid  string `json:"uuid"`
-	Email string `json:"email"`
-}
-
-type UsersResponse struct {
-	Users []User `json:"users"`
-}
-
-type UserCreation struct {
-	Email string `json:"email"`
-}
-
-type MailTask struct {
-	Email string
-	Key   string
 }
