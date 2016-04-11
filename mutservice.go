@@ -93,7 +93,7 @@ func postDailyMoods(database *storm.DB) echo.HandlerFunc {
 
 		if feedbackIdentifier := getFeedbackIdentifier(database, key); feedbackIdentifier != nil {
 			if databaseError := updateDailyMoods(database, feedbackIdentifier.DateString, mood); databaseError != nil {
-				return context.String(http.StatusInternalServerError, databaseError.Error())
+				return databaseError
 			} else {
 				return context.String(http.StatusCreated, "Thank you!")
 			}
@@ -110,7 +110,7 @@ func getSubscribers(database *storm.DB) echo.HandlerFunc {
 		subscriptions, databaseError := getSubscriptions(database)
 
 		if databaseError != nil {
-			return context.String(http.StatusInternalServerError, databaseError.Error())
+			return databaseError
 		} else {
 			return context.JSON(http.StatusOK, subscriptions)
 		}
@@ -125,7 +125,7 @@ func getSubscribersByUuid(database *storm.DB) echo.HandlerFunc {
 		subscriber, databaseError := getSubscriptionByUuid(database, uuid)
 
 		if databaseError != nil {
-			return context.String(http.StatusInternalServerError, databaseError.Error())
+			return databaseError
 		} else {
 			if subscriber != nil {
 				return context.JSON(http.StatusOK, subscriber)
@@ -142,14 +142,14 @@ func postSubscriber(db *storm.DB) echo.HandlerFunc {
 	return (func(context echo.Context) error {
 		subscription := new(Subscription)
 		if jsonError := context.Bind(subscription); jsonError != nil {
-			return context.String(http.StatusInternalServerError, jsonError.Error())
+			return jsonError
 		} else {
-			subscriber, dbError := saveSubscription(db, subscription)
+			subscriber, databaseError := saveSubscription(db, subscription)
 
 			log.Printf("Saved user: %s\n", subscriber)
 
-			if dbError != nil {
-				return context.String(http.StatusInternalServerError, dbError.Error())
+			if databaseError != nil {
+				return databaseError.Error()
 			} else {
 				return context.JSON(http.StatusCreated, subscriber)
 			}
