@@ -63,7 +63,7 @@ func initServer(database *storm.DB) (server *echo.Echo) {
 
 func setLogLocation(server *echo.Echo) (logFile *os.File) {
 	if os.Getenv("OPENSHIFT_DATA_DIR") != "" {
-		logFile, fileError := os.OpenFile(os.Getenv("OPENSHIFT_DIY_LOG_DIR") + "mut.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+		logFile, fileError := os.OpenFile(os.Getenv("OPENSHIFT_DATA_DIR") + "mut.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
 
 		if fileError != nil {
 			log.Fatal(fileError)
