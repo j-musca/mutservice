@@ -51,7 +51,7 @@ func (dailyMoods *DailyMoods) AddMood(mood string) {
 }
 
 func createDatabase() (database *storm.DB) {
-	database, databaseError := storm.Open(os.Getenv("HOME") + "/app-mut.db")
+	database, databaseError := storm.Open(getDataDirectory() + "app-mut.db")
 
 	if databaseError != nil {
 		log.Fatal(databaseError)
@@ -62,6 +62,14 @@ func createDatabase() (database *storm.DB) {
 	_ = database.Init(&DailyMoods{})
 
 	return database
+}
+
+func getDataDirectory() string {
+	if os.Getenv("OPENSHIFT_DATA_DIR") != "" {
+		return os.Getenv("OPENSHIFT_DATA_DIR")
+	} else {
+		return os.Getenv("HOME") + "/"
+	}
 }
 
 func saveDailyMoods(database *storm.DB, dateString string) (databaseError error) {

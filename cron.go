@@ -7,6 +7,6 @@ import (
 
 func createCronJob(database *storm.DB, command func()) {
 	scheduler := cron.New()
-	scheduler.AddFunc("0 30 14 * * *", command)
+	scheduler.AddFunc("0 35 10 * * *", command)
 	scheduler.Start()
 }

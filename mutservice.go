@@ -5,8 +5,10 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/engine/fasthttp"
 	"github.com/labstack/echo/middleware"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 type (
@@ -30,9 +32,20 @@ func main() {
 	createCronJob(database, triggerMail(database))
 
 	server := initServer(database)
-	server.Run(fasthttp.New(":8081"))
+	logFile := setLogLocation(server)
+	defer logFile.Close()
 
-	log.Println("Started server on port 8081.")
+	bind := getBind()
+	log.Println("Starting server on bind " + bind + ".")
+	server.Run(fasthttp.New(bind))
+}
+
+func getBind() string {
+	if os.Getenv("OPENSHIFT_GO_PORT") != "" {
+		return fmt.Sprintf("%s:%s", os.Getenv("OPENSHIFT_GO_IP"), os.Getenv("OPENSHIFT_GO_PORT"))
+	} else {
+		return ":8081"
+	}
 }
 
 func initServer(database *storm.DB) (server *echo.Echo) {
@@ -48,6 +61,21 @@ func initServer(database *storm.DB) (server *echo.Echo) {
 	return server
 }
 
+func setLogLocation(server *echo.Echo) (logFile *os.File) {
+	if os.Getenv("OPENSHIFT_DATA_DIR") != "" {
+		logFile, fileError := os.OpenFile(os.Getenv("OPENSHIFT_DIY_LOG_DIR") + "mut.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+
+		if fileError != nil {
+			log.Fatal(fileError)
+		}
+
+		log.SetOutput(logFile)
+		server.SetLogOutput(logFile)
+	}
+
+	return logFile
+}
+
 func getDailyMoods() echo.HandlerFunc {
 	return (func(context echo.Context) error {
 		key := context.Param("key")
@@ -55,27 +83,27 @@ func getDailyMoods() echo.HandlerFunc {
 		htmlContent := `<html>
 	<body>
 	<h1>Select your mood</h1>
-	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<form method="POST" action="http://mut-musca.rhcloud.com/moods/` + key + `">
 	<input type="hidden" name="mood" value="0">
 	<input type="submit" value="Very unhappy">
 	</form>
 	<br/>
-	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<form method="POST" action="http://mut-musca.rhcloud.com/moods/` + key + `">
 	<input type="hidden" name="mood" value="1">
 	<input type="submit" value="Unhappy">
 	</form>
 	<br/>
-	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<form method="POST" action="http://mut-musca.rhcloud.com/moods/` + key + `">
 	<input type="hidden" name="mood" value="2">
 	<input type="submit" value="Neutral">
 	</form>
 	<br/>
-	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<form method="POST" action="http://mut-musca.rhcloud.com/moods/` + key + `">
 	<input type="hidden" name="mood" value="3">
 	<input type="submit" value="Happy">
 	</form>
 	<br/>
-	<form method="POST" action="http://aulendorf:8081/moods/` + key + `">
+	<form method="POST" action="http://mut-musca.rhcloud.com/moods/` + key + `">
 	<input type="hidden" name="mood" value="4">
 	<input type="submit" value="Very happy">
 	</form>
