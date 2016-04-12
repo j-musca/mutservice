@@ -91,6 +91,11 @@ func updateDailyMoods(database *storm.DB, dateString string, mood string) (datab
 	return database.Save(dailyMoods)
 }
 
+func getAllDailyMoods(database *storm.DB) (dailyMoods []DailyMoods, databaseError error) {
+	databaseError = database.All(&dailyMoods)
+	return dailyMoods, databaseError
+}
+
 func saveSubscriber(database *storm.DB, subscription *Subscription) (subscriber Subscriber, databaseError error) {
 	uuid, _ := uuid.NewV4()
 	subscriber = Subscriber{uuid.String(), subscription.Email}

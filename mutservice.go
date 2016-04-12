@@ -55,7 +55,8 @@ func initServer(database *storm.DB) (server *echo.Echo) {
 	server.Get("/subscribers", getSubscribers(database))
 	server.Get("/subscribers/:uuid", getSubscribersByUuid(database))
 	server.Post("/subscribers", postSubscriber(database))
-	server.Get("/moods/:key", getDailyMoods())
+	server.Get("/moods", getDailyMoods(database))
+	server.Get("/moods/:key", getDailyMoodsForm())
 	server.Post("/moods/:key", postDailyMoods(database))
 
 	return server
@@ -76,7 +77,21 @@ func setLogLocation(server *echo.Echo) (logFile *os.File) {
 	return logFile
 }
 
-func getDailyMoods() echo.HandlerFunc {
+func getDailyMoods(database *storm.DB) echo.HandlerFunc {
+	return (func(context echo.Context) error {
+		dailyMoods, databaseError := getAllDailyMoods(database)
+
+		if databaseError != nil {
+			return databaseError
+		} else {
+			return context.JSON(http.StatusOK, dailyMoods)
+		}
+
+		return nil
+	})
+}
+
+func getDailyMoodsForm() echo.HandlerFunc {
 	return (func(context echo.Context) error {
 		key := context.Param("key")
 
