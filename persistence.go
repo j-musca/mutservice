@@ -18,12 +18,12 @@ type (
 	}
 
 	DailyMoods struct {
-		DateString  string `storm:"id"`
-		VeryUnhappy int
-		Unhappy     int
-		Neutral     int
-		Happy       int
-		VeryHappy   int
+		DateString  string `json:"date" storm:"id"`
+		VeryUnhappy int `json:"very-unhappy"`
+		Unhappy     int `json:"unhappy"`
+		Neutral     int `json:"neutral"`
+		Happy       int `json:"happy"`
+		VeryHappy   int `json:"very-happy"`
 	}
 
 	Subscriber struct {
