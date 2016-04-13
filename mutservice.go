@@ -32,9 +32,6 @@ func main() {
 	createCronJob(database, triggerMail(database))
 
 	server := initServer(database)
-	appLogFile, requestLogFile := setLogLocation(server)
-	defer appLogFile.Close()
-	defer requestLogFile.Close()
 
 	bind := getBind()
 	log.Println("Starting server on bind " + bind + ".")
@@ -61,22 +58,6 @@ func initServer(database *storm.DB) (server *echo.Echo) {
 	server.Post("/moods/:key", postDailyMoods(database))
 
 	return server
-}
-
-func setLogLocation(server *echo.Echo) (appLogFile *os.File, requestLogFile *os.File) {
-	if os.Getenv("OPENSHIFT_DATA_DIR") != "" {
-		appLogFile, fileError := os.OpenFile(os.Getenv("OPENSHIFT_DATA_DIR") + "mut-app.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
-		requestLogFile, fileError := os.OpenFile(os.Getenv("OPENSHIFT_DATA_DIR") + "mut-request.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
-
-		if fileError != nil {
-			log.Fatal(fileError)
-		}
-
-		log.SetOutput(appLogFile)
-		server.SetLogOutput(requestLogFile)
-	}
-
-	return appLogFile, requestLogFile
 }
 
 func getDailyMoods(database *storm.DB) echo.HandlerFunc {
